@@ -1,45 +1,60 @@
-# Exadata DR Network Bundle
+# OCI Cross-Region DR Networking Bundle for Exadata Database on Oracle Database@Azure
 
-This bundle automates the OCI networking-only portion of cross-region disaster recovery for Exadata Database on Oracle Database@Azure.
+This repository contains a Cloud Shell-friendly automation bundle for the OCI networking portion of cross-region disaster recovery for Exadata Database on Oracle Database@Azure.
 
-It does not configure databases, Data Guard, backups, compute, or applications. It creates and removes only the OCI networking components needed for the DR transit topology.
+The bundle is intentionally limited to OCI networking. It does not configure databases, Data Guard, backups, compute, or application components.
 
-## What The Bundle Does
+## What This Bundle Creates
 
-The setup script:
-- validates the config and VCN ownership
-- discovers the client and backup subnets by CIDR
-- creates DRGs and remote peering connections
-- peers the remote peering connections
-- creates hub VCNs in both regions
-- creates custom hub route tables
-- creates and peers LPGs in both regions
-- attaches each hub VCN to its DRG
-- updates the hub, Exadata, and DRG route tables
-- creates NSGs in the Exadata VCNs
+The setup workflow builds the networking transit path needed between a primary-region Exadata VCN and a standby-region Exadata VCN:
 
-The rollback script:
-- removes the route rules added by setup
-- deletes the NSGs
-- deletes the remote peering connections
-- deletes the DRG attachments
-- deletes the LPGs
-- deletes the created hub route tables
-- deletes the DRGs
-- deletes the hub VCNs
+- one hub VCN in the primary region
+- one hub VCN in the standby region
+- local peering gateways between each Exadata VCN and its regional hub VCN
+- one DRG in each region
+- one remote peering connection attached to each DRG
+- DRG peering between the two regions
+- route table updates for Exadata VCNs, hub VCNs, and DRG routing
+- NSGs for cross-region Oracle Net access
 
-Both scripts are designed to tolerate partial runs and missing resources.
+The rollback workflow removes only the artifacts created by the setup script and is designed to tolerate partial deployments.
 
-## Main Files
+## Repository Files
 
 - `exadb_dr_network.conf`
 - `setup_exadb_dr_network.sh`
 - `rollback_exadb_dr_network.sh`
+
+Generated at runtime:
+
 - `exadb_dr_network.log`
+- `exadb_dr_network_state_<timestamp>.env`
 
-## Config File Overview
+## Design Principles
 
-The config file contains these sections:
+- flat bundle layout suitable for OCI Cloud Shell
+- Bash, OCI CLI, and standard Python only
+- no external packages or helper frameworks
+- separate primary and standby region configuration
+- rollback-safe state tracking
+- explicit peering verification for LPGs and DRGs
+- parallel per-region workstreams where practical
+
+## Prerequisites
+
+Before running the scripts, make sure:
+
+- OCI CLI is available in Cloud Shell
+- your OCI identity has permission to manage VCN networking resources in both compartments
+- the primary and standby Exadata VCNs already exist
+- the client and backup subnet CIDRs you provide already exist in those VCNs
+- the primary and standby regions are different
+
+## Configuration
+
+Edit `exadb_dr_network.conf` before running setup.
+
+The config file uses these sections:
 
 - `[primary_region_configuration]`
 - `[standby_region_configuration]`
@@ -47,9 +62,10 @@ The config file contains these sections:
 - `[database_listener_configuration]`
 - `[global_optional_configuration]`
 
-### Required Settings
+### Required values
 
 Primary region:
+
 - `PRIMARY_REGION`
 - `PRIMARY_COMPARTMENT_OCID`
 - `PRIMARY_VCN_OCID`
@@ -57,155 +73,141 @@ Primary region:
 - `PRIMARY_BACKUP_SUBNET_CIDR`
 
 Standby region:
+
 - `STANDBY_REGION`
 - `STANDBY_COMPARTMENT_OCID`
 - `STANDBY_VCN_OCID`
 - `STANDBY_CLIENT_SUBNET_CIDR`
 - `STANDBY_BACKUP_SUBNET_CIDR`
 
-### Optional Settings
+### Optional values
 
-Hub VCNs:
+Hub VCN CIDRs:
+
 - `PRIMARY_HUB_VCN_CIDR`
 - `STANDBY_HUB_VCN_CIDR`
 
-If either hub CIDR is blank, the setup script auto-picks a small non-overlapping `/29` CIDR for the missing hub VCN. If you provide values, the script uses them as-is and validates overlap safety.
+If these are left blank, the setup script auto-picks safe non-overlapping `/29` CIDRs.
 
-Database listener ports:
+Listener ports:
+
 - `DB_TCP_LISTENER_PORT`
 - `DB_TCPS_LISTENER_PORT`
 
-If set, the setup script adds NSG listener rules for those ports. If blank, those listener rules are skipped.
+If set, the setup script adds NSG rules for those listener ports. Common values are `1521` for TCP and `2484` for TCPS.
 
 Other optional values:
+
 - `ALLOW_SSH`
 - `NAME_PREFIX`
 
-## Recommended Hub VCN Size
+## Recommended Hub VCN Sizing
 
-For this transit design, the hub VCN does not require subnets, so the hub CIDR can be very small. A `/29` is a practical size and matches the small transit CIDR style used in Oracle examples for this type of topology.
+Because the hub VCNs act as transit VCNs and do not require application subnets, a very small CIDR is sufficient. A `/29` is the recommended practical size for this design and is the default auto-selection target when hub CIDRs are not provided.
 
-## How To Run
+## Quick Start
 
-From OCI Cloud Shell:
+1. Clone or upload the repository contents into OCI Cloud Shell.
+2. Edit `exadb_dr_network.conf`.
+3. Make the scripts executable.
+4. Run setup.
+5. Validate peering and routes.
+6. Use rollback if you need to remove the deployment.
+
+Example:
 
 ```bash
-unzip exadb_dr_network_flat_root.zip
 chmod +x setup_exadb_dr_network.sh rollback_exadb_dr_network.sh
-```
-
-Edit the config:
-
-```bash
 vi exadb_dr_network.conf
-```
-
-Run setup:
-
-```bash
 ./setup_exadb_dr_network.sh
 ```
 
-Run rollback using the latest state file:
+Rollback using the latest state file:
 
 ```bash
 ./rollback_exadb_dr_network.sh
 ```
 
-Run rollback using a specific state file:
+Rollback using a specific state file:
 
 ```bash
 ./rollback_exadb_dr_network.sh ./exadb_dr_network_state_<timestamp>.env
 ```
 
-## What To Configure
+## Setup Workflow Summary
 
-At minimum, set:
+The setup script performs these high-level actions:
 
-```ini
-[primary_region_configuration]
-PRIMARY_REGION=""
-PRIMARY_COMPARTMENT_OCID=""
-PRIMARY_VCN_OCID=""
-PRIMARY_CLIENT_SUBNET_CIDR=""
-PRIMARY_BACKUP_SUBNET_CIDR=""
+1. Validates config values and confirms both Exadata VCNs exist in the expected compartments.
+2. Discovers the configured client and backup subnets by CIDR.
+3. Resolves the hub VCN CIDRs, either from config or by auto-selection.
+4. Creates DRGs and remote peering connections.
+5. Creates hub VCN resources and LPGs in both regions.
+6. Peers the LPGs in each region.
+7. Peers the remote peering connections across regions and verifies the result.
+8. Updates route tables so local and remote client and backup CIDRs route correctly.
+9. Creates NSGs and optional listener and SSH rules.
+10. Writes a timestamped state file for rollback.
 
-[standby_region_configuration]
-STANDBY_REGION=""
-STANDBY_COMPARTMENT_OCID=""
-STANDBY_VCN_OCID=""
-STANDBY_CLIENT_SUBNET_CIDR=""
-STANDBY_BACKUP_SUBNET_CIDR=""
-```
+## Rollback Workflow Summary
 
-Optional hub CIDRs:
+The rollback script:
 
-```ini
-[hub_vcn_configuration]
-PRIMARY_HUB_VCN_CIDR=""
-STANDBY_HUB_VCN_CIDR=""
-```
-
-Optional listener ports:
-
-```ini
-[database_listener_configuration]
-DB_TCP_LISTENER_PORT="1521"
-DB_TCPS_LISTENER_PORT="2484"
-```
-
-Optional global values:
-
-```ini
-[global_optional_configuration]
-ALLOW_SSH="false"
-NAME_PREFIX="exadb-dr-network"
-```
-
-## Parallel Workstreams
-
-The current implementation uses parallel workstreams where practical:
-
-Setup:
-- creates primary and standby DRG/RPC resources in parallel
-- starts RPC peering in the background
-- creates primary and standby local region artifacts in parallel
-- performs post-peering routing and NSG configuration in parallel
-
-Rollback:
-- starts RPC deletion in the background
-- performs per-region route cleanup in parallel
-- performs per-region resource deletion in parallel after RPC deletion completes
+1. locates the newest state file unless you provide one explicitly
+2. starts remote peering connection cleanup first
+3. removes route rules added by setup
+4. removes NSGs created by setup
+5. removes DRG attachments, LPGs, custom route tables, DRGs, and hub VCNs
+6. skips resources that are already missing
+7. tolerates partial state from failed or interrupted setup runs
 
 ## Manual Verification Checklist
 
-After setup:
-- verify primary LPG peering is `PEERED`
-- verify standby LPG peering is `PEERED`
-- verify cross-region RPC peering is `PEERED`
-- verify Exadata route tables point remote client and backup CIDRs to the local LPG
-- verify hub custom route tables are populated
-- verify hub default route tables are populated
-- verify RPC DRG route tables contain static routes to local client and backup CIDRs
-- verify NSGs exist
-- verify listener rules exist only when the listener config values were provided
+After setup, verify:
 
-After rollback:
-- verify the RPCs are deleted
-- verify DRG attachments are deleted
-- verify LPGs are deleted
-- verify created hub route tables are deleted
-- verify DRGs are deleted
-- verify hub VCNs are deleted
+- LPG peering is `PEERED` in the primary region
+- LPG peering is `PEERED` in the standby region
+- DRG remote peering is `PEERED` across regions
+- Exadata VCN route tables send remote client and backup CIDRs to the local LPG
+- hub route tables contain the expected local and remote static routes
+- RPC DRG route tables contain static routes for local client and backup CIDRs
+- NSGs were created in both Exadata VCNs
+- listener port rules exist only if listener ports were configured
 
-## Logs And State
+After rollback, verify:
 
-The setup and rollback scripts append to:
+- remote peering connections are gone
+- DRG attachments are gone
+- LPGs are gone
+- created hub route tables are gone
+- created DRGs are gone
+- created hub VCNs are gone
+
+## Logging And State
+
+Both scripts write to:
 
 - `exadb_dr_network.log`
 
-Setup also creates a timestamped state file like:
+The setup script also creates:
 
 - `exadb_dr_network_state_<timestamp>.env`
 
-That state file is used by rollback to identify and remove only the resources created by setup.
+That state file is used by rollback to delete only the resources created by setup.
+
+## Scope Boundaries
+
+This repository does not perform:
+
+- database provisioning
+- Data Guard configuration
+- backup configuration
+- compute provisioning
+- Azure-side networking changes
+- application failover configuration
+
+## Notes
+
+- Keep all bundle files in one folder when using OCI Cloud Shell.
+- The scripts are intended to run non-interactively where OCI CLI supports it.
+- The generated log and state files are runtime artifacts and usually should not be committed after execution.
