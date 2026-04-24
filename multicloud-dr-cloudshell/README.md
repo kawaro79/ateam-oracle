@@ -1,6 +1,6 @@
-# Automating the OCI Networking Layer for Exadata Database@Azure Cross-Region DR
+# Automating the OCI Networking Layer for Exadata Database@X (Azure, Google Cloud, AWS) Cross-Region DR
 
-This repository contains a focused automation bundle for the OCI networking layer of cross-region disaster recovery for Exadata Database on Oracle Database@Azure.
+This repository contains a focused automation bundle for the OCI networking layer of cross-region disaster recovery for Exadata Database on Oracle Database@X.
 
 The key point is the word *focused*.
 
