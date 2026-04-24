@@ -6,6 +6,11 @@ The key point is the word *focused*.
 
 The scripts do not attempt to provision the database, configure Data Guard, manage backups, create compute, or automate application failover. They are built specifically to implement the OCI networking tasks required to connect a primary-region Exadata environment to a standby-region Exadata environment using the hub VCN, LPG, DRG, and RPC pattern from the Oracle reference architecture.
 
+## Architecture diagram
+
+![ExaDB-D-DR-DB-Azure](./images/exadb-dr-db-azure.png)
+
+
 ## Why this bundle exists
 
 The reference architecture is clear, but the implementation has enough steps that it is easy to miss something when working manually:
